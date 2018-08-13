@@ -174,8 +174,6 @@ void AODVStandardRouting::handleMessage(cMessage *msg)
         UDPPacket *udpPacket = check_and_cast<UDPPacket *>(msg);
         AODVStandardControlPacket *ctrlPacket = check_and_cast<AODVStandardControlPacket *>(udpPacket->decapsulate());
 
-        emit(rcvdRLSignal, ctrlPacket);
-
         INetworkProtocolControlInfo *udpProtocolCtrlInfo = check_and_cast<INetworkProtocolControlInfo *>(udpPacket->getControlInfo());
         L3Address sourceAddr = udpProtocolCtrlInfo->getSourceAddress();
         unsigned int arrivalPacketTTL = udpProtocolCtrlInfo->getHopLimit();
@@ -237,7 +235,7 @@ void AODVStandardRouting::recordUtilization(int packetSize, Path path)
     ///////////Result Recording/////////////////////
     ////////////////////////////////////////////////
 
-    std::cout << host->getId() << "," << host->getFullName() << "," << (overallConsumingBandwidth * 8) << endl;
+    std::cout << host->getFullName() << "," << host->getId() << "," << "Bandwidth," << (overallConsumingBandwidth * 8) << endl;
 }
 
 void AODVStandardRouting::defineBandwidthOverhead(std::vector<NodeUtilization::TransmissionOverHead>& transmissionOverhead)
@@ -822,7 +820,7 @@ void AODVStandardRouting::handleRREP(AODVStandardRREP *rrep, const L3Address& so
     {
         if (hasOngoingRouteDiscovery(rrep->getDestAddr()))
         {
-            std::cout << host->getId() << "," << host->getFullName() << "," << rrep->getTotalHopsToDest() << endl;
+            std::cout << host->getFullName() << "," << host->getId() << "," << "NumParticipants," << rrep->getTotalHopsToDest() << endl;
             EV_INFO << "The Route Reply has arrived for our Route Request to node " << rrep->getDestAddr() << endl;
             updateRoutingTable(destRoute, sourceAddr, newHopCount, true, destSeqNum, true, simTime() + lifeTime);
             completeRouteDiscovery(rrep->getDestAddr());
@@ -874,6 +872,7 @@ void AODVStandardRouting::sendAODVPacket(AODVStandardControlPacket *packet, cons
     udpPacket->setDestinationPort(aodvUDPPort);
     udpPacket->setControlInfo(dynamic_cast<cObject *>(networkProtocolControlInfo));
 
+    emit(rcvdRLSignal, udpPacket);
     if (destAddr.isBroadcast())
         lastBroadcastTime = simTime();
 

@@ -30,14 +30,14 @@ QoSRequirementsMapping::QoSRequirelemts* QoSRequirementsMapping::determineQoSReq
     if (tos > 0 && tos < 32)
     {
         requirements->setMaxDelay(1100);
-        requirements->setMinBandwidth(250);
-        requirements->setMinSlotTime(47);
+        requirements->setMinBandwidth(1000);
+        requirements->setMinSlotTime(55);
     }
     else if (tos > 32 && tos < 64)
     {
         requirements->setMaxDelay(80);
-        requirements->setMinBandwidth(175);
-        requirements->setMinSlotTime(42);
+        requirements->setMinBandwidth(700);
+        requirements->setMinSlotTime(150);
     }
     return requirements;
 }

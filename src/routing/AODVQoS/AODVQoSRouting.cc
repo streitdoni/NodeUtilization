@@ -209,8 +209,6 @@ void AODVQoSRouting::handleMessage(cMessage *msg)
         UDPPacket *udpPacket = check_and_cast<UDPPacket *>(msg);
         AODVQoSControlPacket *ctrlPacket = check_and_cast<AODVQoSControlPacket *>(udpPacket->decapsulate());
 
-        emit(rcvdRLSignal, ctrlPacket);
-
         INetworkProtocolControlInfo *udpProtocolCtrlInfo = check_and_cast<INetworkProtocolControlInfo *>(udpPacket->getControlInfo());
         L3Address sourceAddr = udpProtocolCtrlInfo->getSourceAddress();
         unsigned int arrivalPacketTTL = udpProtocolCtrlInfo->getHopLimit();
@@ -271,21 +269,30 @@ double AODVQoSRouting::determineQoSRREQTreatment(double requiredBandwidth, doubl
     {
         singleHopTranmissionTimes.erase(singleHopTranmissionTimes.begin());
     }
-    singleHopTranmissionTimes.push_back(oneHopTransmissionTime);
 
+    singleHopTranmissionTimes.push_back(oneHopTransmissionTime);
+    double averageOneHopTransmissionTime = 0.0;
     for (std::vector<double>::iterator it = singleHopTranmissionTimes.begin(); it != singleHopTranmissionTimes.end(); it++)
     {
-        oneHopTransmissionTime = oneHopTransmissionTime + *it;
+        averageOneHopTransmissionTime = averageOneHopTransmissionTime + *it;
     }
-    oneHopTransmissionTime = oneHopTransmissionTime / singleHopTranmissionTimes.size();
+    averageOneHopTransmissionTime = averageOneHopTransmissionTime / singleHopTranmissionTimes.size();
 
     /****************************
      *Determining available bandwidth
      *****************************/
-    double maxTreatedDelay = (oneHopTransmissionTime * 50 * 2);
+    double maxTreatedDelay = (oneHopTransmissionTime * 35 * 2);
     double theoreticalAvailableBytes = (isIntermediate ? (2000000 / 8) / maxHops : (2000000 / 8)) * 0.90;
     double currentAvailability = (1 / theoreticalAvailableBytes * (theoreticalAvailableBytes - overheadByte));
     double requiredResources = ((requiredBandwidth + 14 + 36 + 28 + 8) / requiredSlotTime) * 1000;
+
+    double newRREQ = (2.0 * nodeTraversalTime * (ttlStart + timeoutBuffer)).dbl();
+
+    if (oneHopTransmissionTime * 2 >= newRREQ)
+    {
+        std::cout << host->getFullName() << "," << host->getId() << "," << "LongTransmissionTime," << simTime() << "," << oneHopTransmissionTime << endl;
+        return -1;
+    }
 
     if (currentAvailability >= 0.99)
     {
@@ -303,8 +310,13 @@ double AODVQoSRouting::determineQoSRREQTreatment(double requiredBandwidth, doubl
         {
             double demandedResources = 1 - capacityLeft;
             double delay = (maxTreatedDelay / 1) * demandedResources;
-//             std::cout << "Delayed," << simTime() << "," << delay << endl;
-            return -1;
+            if (delay >= newRREQ)
+            {
+                std::cout << host->getFullName() << "," << host->getId() << "," << "LongTransmissionTime," << simTime() << "," << delay << endl;
+                return -1;
+            }
+            std::cout << host->getFullName() << "," << host->getId() << "," << "Delayed," << simTime() << "," << delay << endl;
+            return delay;
         }
     }
 }
@@ -367,7 +379,7 @@ void AODVQoSRouting::recordUtilization(int packetSize, Path path)
     ///////////Result Recording/////////////////////
     ////////////////////////////////////////////////
 
-//    std::cout << "Bandwidth," << host->getId() << "," << host->getFullName() << "," << (overallConsumingBandwidth * 8) << endl;
+    std::cout << host->getFullName() << "," << host->getId() << "," << "Bandwidth," << (overallConsumingBandwidth * 8) << endl;
 }
 
 void AODVQoSRouting::defineBandwidthOverhead(std::vector<NodeUtilization::TransmissionOverHead>& transmissionOverhead)
@@ -1001,7 +1013,7 @@ void AODVQoSRouting::handleRREP(AODVQoSRREP *rrep, const L3Address& sourceAddr)
                 totalNodeUtilzation[tmpPath] = new NodeUtilization(rrep->getTotalHopsToDest(), NodeUtilization::Position::SENDER);
             }
 
-//            std::cout << "NumParticipants," << host->getId() << "," << host->getFullName() << "," << rrep->getTotalHopsToDest() << endl;
+            std::cout << host->getFullName() << "," << host->getId() << "," << "NumParticipants," << rrep->getTotalHopsToDest() << endl;
             EV_INFO << "The Route Reply has arrived for our Route Request to node " << rrep->getDestAddr() << endl;
             updateRoutingTable(destRoute, sourceAddr, newHopCount, true, destSeqNum, true, simTime() + lifeTime);
             completeRouteDiscovery(rrep->getDestAddr());
@@ -1053,6 +1065,7 @@ void AODVQoSRouting::sendAODVPacket(AODVQoSControlPacket *packet, const L3Addres
     udpPacket->setDestinationPort(aodvUDPPort);
     udpPacket->setControlInfo(dynamic_cast<cObject *>(networkProtocolControlInfo));
 
+    emit(rcvdRLSignal, udpPacket);
     if (destAddr.isBroadcast())
         lastBroadcastTime = simTime();
 
@@ -1200,6 +1213,18 @@ void AODVQoSRouting::handleRREQ(AODVQoSRREQ *rreq, const L3Address& sourceAddr, 
     IRoute *destRoute = routingTable->findBestMatchingRoute(rreq->getDestAddr());
     AODVQoSRouteData *destRouteData = destRoute ? dynamic_cast<AODVQoSRouteData *>(destRoute->getProtocolData()) : nullptr;
 
+    /****************************************************/
+    /******************QoS-Extended**********************/
+    /****************************************************/
+    double result = determineQoSRREQTreatment(rreq->getMinAvailableBandwidth(), rreq->getMinAvailableSlotTime(), rreq->getOneHopTransmissionTime());
+    rcvdRREQWithKnownDestination++;
+    if (result == -1 && !routingTable->isLocalAddress(rreq->getDestAddr()))
+    {
+        std::cout << host->getFullName() << "," << host->getId() << "," << "DeletedRREQOverload," << simTime() << endl;
+        delete rreq;
+        return;
+    }
+
 // check (i)
     if (rreq->getDestAddr() == getSelfIPAddress())
     {
@@ -1241,17 +1266,6 @@ void AODVQoSRouting::handleRREQ(AODVQoSRREQ *rreq, const L3Address& sourceAddr, 
             return;
         }
 
-        /****************************************************/
-        /******************QoS-Extended**********************/
-        /****************************************************/
-        double result = determineQoSRREQTreatment(rreq->getMinAvailableBandwidth(), rreq->getMinAvailableSlotTime(), rreq->getOneHopTransmissionTime());
-        rcvdRREQWithKnownDestination++;
-        if (result == -1 && !routingTable->isLocalAddress(rreq->getDestAddr()))
-        {
-//            std::cout << "DeletedRREQ," << simTime() << endl;
-            delete rreq;
-            return;
-        }
         // create RREP
         AODVQoSRREP *rrep = createQoSRREP(rreq, destRoute, reverseRoute, sourceAddr);
 
@@ -1296,7 +1310,7 @@ void AODVQoSRouting::handleRREQ(AODVQoSRREQ *rreq, const L3Address& sourceAddr, 
         rreq->setUnknownSeqNumFlag(false);
 
         AODVQoSRREQ *outgoingRREQ = rreq->dup();
-        forwardRREQ(outgoingRREQ, timeToLive, 0);
+        forwardRREQ(outgoingRREQ, timeToLive, result);
     }
     else
         EV_WARN << "Can't forward the RREQ because of its small (<= 1) TTL: " << timeToLive << " or the AODV reboot has not completed yet" << endl;
@@ -1747,7 +1761,7 @@ void AODVQoSRouting::forwardRREP(AODVQoSRREP *rrep, const L3Address& destAddr, u
 void AODVQoSRouting::forwardRREQ(AODVQoSRREQ *rreq, unsigned int timeToLive, double delay)
 {
     EV_INFO << "Forwarding the Route Request message with TTL= " << timeToLive << endl;
-    rreq->setOneHopTransmissionTime(simTime());
+    rreq->setOneHopTransmissionTime(simTime().dbl() - delay);
     sendAODVPacket(rreq, addressType->getBroadcastAddress(), timeToLive, jitterPar->doubleValue() + delay);
 }
 
@@ -2187,8 +2201,8 @@ AODVQoSRouting::~AODVQoSRouting()
     }
 
 //    std::cout << numRREQWithoutReply << endl;
-    std::cout << "NumOfKnownDestOfIntermediate,," << rcvdRREQWithKnownDestination << endl;
-    std::cout << "SentRREQ," << +sentRREQ << endl;
+    std::cout << host->getFullName() << "," << host->getId() << "," << "NumOfKnownDestOfIntermediate," << rcvdRREQWithKnownDestination << endl;
+    std::cout << host->getFullName() << "," << host->getId() << "," << "SentRREQ," << sentRREQ << endl;
 
 }
 
