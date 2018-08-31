@@ -120,6 +120,8 @@ protected:
     simtime_t nextHopWait;
     simtime_t pathDiscoveryTime;
 
+    simtime_t bandwidthSecond;
+
     // state
     unsigned int rreqId = 0;    // when sending a new RREQ packet, rreqID incremented by one from the last id used by this node
     unsigned int sequenceNum = 0;    // it helps to prevent loops in the routes (RFC 3561 6.1 p11.)
@@ -154,11 +156,14 @@ protected:
     /*************/
     /*TryAndError*/
     int numRREQWithoutReply = 0;
+    int numberOfStoppedRequest = 0;
 
     TotalNodeUtilization totalNodeUtilzation;
 
     /*ResultRecording*/
     static simsignal_t rcvdRLSignal;
+    int sentRREQ = 0;
+    int rcvdRREQWithKnownDestination = 0;
 
 protected:
     void handleMessage(cMessage *msg) override;

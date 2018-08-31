@@ -122,6 +122,7 @@ void AODVStandardRouting::initialize(int stage)
             scheduleAt(simTime() + helloInterval - periodicJitter->doubleValue(), helloMsgTimer);
         }
 
+        bandwidthSecond = SimTime(0,SIMTIME_S);
         expungeTimer = new cMessage("ExpungeTimer");
         counterTimer = new cMessage("CounterTimer");
         rrepAckTimer = new cMessage("RREPACKTimer");
@@ -235,7 +236,11 @@ void AODVStandardRouting::recordUtilization(int packetSize, Path path)
     ///////////Result Recording/////////////////////
     ////////////////////////////////////////////////
 
-    std::cout << host->getFullName() << "," << host->getId() << "," << "Bandwidth," << (overallConsumingBandwidth * 8) << endl;
+    if (bandwidthSecond + SimTime(1, SIMTIME_S) < simTime())
+    {
+        std::cout << host->getFullName() << "," << host->getId() << ",SimTime," << simTime() << "," << "Bandwidth," << (overallConsumingBandwidth * 8) << endl;
+        bandwidthSecond = bandwidthSecond + simTime();
+    }
 }
 
 void AODVStandardRouting::defineBandwidthOverhead(std::vector<NodeUtilization::TransmissionOverHead>& transmissionOverhead)
@@ -347,6 +352,7 @@ bool AODVStandardRouting::hasOngoingRouteDiscovery(const L3Address& target)
 void AODVStandardRouting::startRouteDiscovery(const L3Address& target, unsigned timeToLive)
 {
     EV_INFO << "Starting route discovery with originator " << getSelfIPAddress() << " and destination " << target << endl;
+    std::cout << simTime() << ",SentRREQ" << endl;
     ASSERT(!hasOngoingRouteDiscovery(target));
     AODVStandardRREQ *rreq = createRREQ(target);
     addressToRreqRetries[target] = 0;
@@ -1032,7 +1038,7 @@ void AODVStandardRouting::handleRREQ(AODVStandardRREQ *rreq, const L3Address& so
     if (destRouteData && destRouteData->isActive() && destRouteData->hasValidDestNum() && destRouteData->getDestSeqNum() >= rreq->getDestSeqNum())
     {
         EV_INFO << "I am an intermediate node who has information about a route to " << rreq->getDestAddr() << endl;
-
+        std::cout << simTime() << ",RREQWithKnownDestination" << endl;
         if (destRoute->getNextHopAsGeneric() == sourceAddr)
         {
             EV_WARN << "This RREP would make a loop. Dropping it" << endl;
@@ -1438,9 +1444,12 @@ void AODVStandardRouting::handleWaitForRREP(WaitForRREP *rrepTimer)
     EV_INFO << "We didn't get any Route Reply within RREP timeout" << endl;
     L3Address destAddr = rrepTimer->getDestAddr();
     numRREQWithoutReply++;
+    std::cout << simTime() << "RREQWithoutReply,1" << endl;
     ASSERT(addressToRreqRetries.find(destAddr) != addressToRreqRetries.end());
     if (addressToRreqRetries[destAddr] == rreqRetries)
     {
+        std::cout << simTime() << "StoppedRequest,1" << endl;
+        numRREQWithoutReply++;
         cancelRouteDiscovery(destAddr);
         EV_WARN << "Re-discovery attempts for node " << destAddr << " reached RREQ_RETRIES= " << rreqRetries << " limit. Stop sending RREQ." << endl;
         return;
@@ -1900,6 +1909,8 @@ AODVStandardRouting::~AODVStandardRouting()
     delete counterTimer;
     delete rrepAckTimer;
     delete blacklistTimer;
-//    std::cout << numRREQWithoutReply << endl;
+
+    std::cout << numRREQWithoutReply << endl;
+    std::cout << numberOfStoppedRequest << endl;
 }
 

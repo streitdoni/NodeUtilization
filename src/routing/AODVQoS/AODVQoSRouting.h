@@ -84,6 +84,7 @@ protected:
     IRoutingTable *routingTable = nullptr;
     IInterfaceTable *interfaceTable = nullptr;
     INetfilter *networkProtocol = nullptr;
+    simtime_t bandwidthSecond;
 
     // AODV parameters: the following parameters are configurable, see the NED file for more info.
     unsigned int rerrRatelimit = 0;
@@ -174,6 +175,7 @@ protected:
     /*TryAndError*/
     /*************/
     int numRREQWithoutReply = 0;
+    int numberOfStoppedRequest = 0;
     int sentRREQ = 0;
     int rcvdRREQWithKnownDestination = 0;
 

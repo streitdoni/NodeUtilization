@@ -23,7 +23,7 @@ import inet.networklayer.ipv4.RoutingTableRecorder;
 import inet.physicallayer.idealradio.IdealRadioMedium;
 import inet.visualizer.integrated.IntegratedVisualizer;
 import src.node.AODVQoSRouter;
-
+import inet.node.aodv.AODVRouter;
 //import inet.physicallayer.ieee80211.packetlevel.Ieee80211ScalarRadioMedium;
 //import inet.common.misc.ThruputMeteringChannel;
 
@@ -92,8 +92,7 @@ network AODVNetwork extends Network
         }
 }
 
-import inet.node.inet.WirelessHost;
-network StaticNetwork extends Network
+network StaticQoSNetwork extends Network
 {
     submodules:
     host[numHosts]: AODVQoSRouter {
@@ -102,5 +101,3 @@ network StaticNetwork extends Network
                 
         }
 }
-
-

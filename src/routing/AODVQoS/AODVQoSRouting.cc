@@ -154,7 +154,7 @@ void AODVQoSRouting::initialize(int stage)
             if (isOperational)
             scheduleAt(simTime() + helloInterval - periodicJitter->doubleValue(), helloMsgTimer);
         }
-
+        bandwidthSecond = SimTime(0,SIMTIME_S);
         expungeTimer = new cMessage("ExpungeTimer");
         counterTimer = new cMessage("CounterTimer");
         rrepAckTimer = new cMessage("RREPACKTimer");
@@ -264,7 +264,6 @@ double AODVQoSRouting::determineQoSRREQTreatment(double requiredBandwidth, doubl
         }
     }
     double oneHopTransmissionTime = (simTime() - singleHopTransmissionTime).dbl();
-
     if (singleHopTranmissionTimes.size() >= 100)
     {
         singleHopTranmissionTimes.erase(singleHopTranmissionTimes.begin());
@@ -281,21 +280,16 @@ double AODVQoSRouting::determineQoSRREQTreatment(double requiredBandwidth, doubl
     /****************************
      *Determining available bandwidth
      *****************************/
-    double maxTreatedDelay = (oneHopTransmissionTime * 35 * 2);
-    double theoreticalAvailableBytes = (isIntermediate ? (2000000 / 8) / maxHops : (2000000 / 8)) * 0.90;
+    double maxTreatedDelay = (0.04 * 39 * 2);
+    double theoreticalAvailableBytes = (isIntermediate ? (2000000 / 8) / maxHops : (2000000 / 8)) * 0.95;
     double currentAvailability = (1 / theoreticalAvailableBytes * (theoreticalAvailableBytes - overheadByte));
     double requiredResources = ((requiredBandwidth + 14 + 36 + 28 + 8) / requiredSlotTime) * 1000;
 
     double newRREQ = (2.0 * nodeTraversalTime * (ttlStart + timeoutBuffer)).dbl();
 
-    if (oneHopTransmissionTime * 2 >= newRREQ)
-    {
-        std::cout << host->getFullName() << "," << host->getId() << "," << "LongTransmissionTime," << simTime() << "," << oneHopTransmissionTime << endl;
-        return -1;
-    }
-
     if (currentAvailability >= 0.99)
     {
+        std::cout << host->getFullName() << "," << host->getId() << "," << "InstantForwarded," << simTime() << endl;
         return 0;
     }
     else
@@ -304,6 +298,7 @@ double AODVQoSRouting::determineQoSRREQTreatment(double requiredBandwidth, doubl
 
         if (capacityLeft < 0.0)
         {
+            std::cout << host->getFullName() << "," << host->getId() << "," << "DeletedRREQOverload," << simTime() << endl;
             return -1;
         }
         else
@@ -312,7 +307,7 @@ double AODVQoSRouting::determineQoSRREQTreatment(double requiredBandwidth, doubl
             double delay = (maxTreatedDelay / 1) * demandedResources;
             if (delay >= newRREQ)
             {
-                std::cout << host->getFullName() << "," << host->getId() << "," << "LongTransmissionTime," << simTime() << "," << delay << endl;
+                std::cout << host->getFullName() << "," << host->getId() << "," << "LongTransmissionTimeDelay," << simTime() << "," << delay << endl;
                 return -1;
             }
             std::cout << host->getFullName() << "," << host->getId() << "," << "Delayed," << simTime() << "," << delay << endl;
@@ -379,7 +374,11 @@ void AODVQoSRouting::recordUtilization(int packetSize, Path path)
     ///////////Result Recording/////////////////////
     ////////////////////////////////////////////////
 
-    std::cout << host->getFullName() << "," << host->getId() << "," << "Bandwidth," << (overallConsumingBandwidth * 8) << endl;
+    if (bandwidthSecond + SimTime(1, SIMTIME_S) < simTime())
+    {
+        std::cout << host->getFullName() << "," << host->getId() << ",SimTime," << simTime() << "," << "Bandwidth," << (overallConsumingBandwidth * 8) << endl;
+        bandwidthSecond = bandwidthSecond + simTime();
+    }
 }
 
 void AODVQoSRouting::defineBandwidthOverhead(std::vector<NodeUtilization::TransmissionOverHead>& transmissionOverhead)
@@ -521,7 +520,7 @@ bool AODVQoSRouting::hasOngoingRouteDiscovery(const L3Address& target)
 void AODVQoSRouting::startQoSRouteDiscovery(const L3Address& target, double minAvailableBandwidth, double minAvailableSlotTime, unsigned timeToLive)
 {
     EV_INFO << "Starting route discovery with originator " << getSelfIPAddress() << " and destination " << target << endl;
-    sentRREQ++;
+    std::cout << simTime() << ",SentRREQ" << endl;
     ASSERT(!hasOngoingRouteDiscovery(target));
     AODVQoSRREQ *rreq = createRREQ(target, minAvailableBandwidth, minAvailableSlotTime);
     addressToRreqRetries[target] = 0;
@@ -1107,22 +1106,22 @@ void AODVQoSRouting::handleRREQ(AODVQoSRREQ *rreq, const L3Address& sourceAddr, 
 // If such a RREQ has been received, the node silently discards the newly received RREQ.
 
     RREQIdentifier rreqIdentifier(rreq->getOriginatorAddr(), rreq->getRreqId());
-//    for (auto it = rreqsArrivalTime.begin(); it != rreqsArrivalTime.end(); it++)
-//    {
-//        if (it->first.originatorAddr == rreq->getOriginatorAddr() && it->first.rreqID == rreq->getRreqId() && simTime() - it->second <= pathDiscoveryTime)
-//        {
-//            EV_WARN << "The same packet has arrived within PATH_DISCOVERY_TIME= " << pathDiscoveryTime << ". Discarding it" << endl;
-//            delete rreq;
-//            return;
-//        }
-//    }
-    auto checkRREQArrivalTime = rreqsArrivalTime.find(rreqIdentifier);
-    if (checkRREQArrivalTime != rreqsArrivalTime.end() && simTime() - checkRREQArrivalTime->second <= pathDiscoveryTime)
+    for (auto it = rreqsArrivalTime.begin(); it != rreqsArrivalTime.end(); it++)
     {
-        EV_WARN << "The same packet has arrived within PATH_DISCOVERY_TIME= " << pathDiscoveryTime << ". Discarding it" << endl;
-        delete rreq;
-        return;
+        if (it->first.originatorAddr == rreq->getOriginatorAddr() && it->first.rreqID == rreq->getRreqId() && simTime() - it->second <= pathDiscoveryTime)
+        {
+            EV_WARN << "The same packet has arrived within PATH_DISCOVERY_TIME= " << pathDiscoveryTime << ". Discarding it" << endl;
+            delete rreq;
+            return;
+        }
     }
+//    auto checkRREQArrivalTime = rreqsArrivalTime.find(rreqIdentifier);
+//    if (checkRREQArrivalTime != rreqsArrivalTime.end() && simTime() - checkRREQArrivalTime->second <= pathDiscoveryTime)
+//    {
+//        EV_WARN << "The same packet has arrived within PATH_DISCOVERY_TIME= " << pathDiscoveryTime << ". Discarding it" << endl;
+//        delete rreq;
+//        return;
+//    }
 
 // update or create
     rreqsArrivalTime[rreqIdentifier] = simTime();
@@ -1217,10 +1216,9 @@ void AODVQoSRouting::handleRREQ(AODVQoSRREQ *rreq, const L3Address& sourceAddr, 
     /******************QoS-Extended**********************/
     /****************************************************/
     double result = determineQoSRREQTreatment(rreq->getMinAvailableBandwidth(), rreq->getMinAvailableSlotTime(), rreq->getOneHopTransmissionTime());
-    rcvdRREQWithKnownDestination++;
+
     if (result == -1 && !routingTable->isLocalAddress(rreq->getDestAddr()))
     {
-        std::cout << host->getFullName() << "," << host->getId() << "," << "DeletedRREQOverload," << simTime() << endl;
         delete rreq;
         return;
     }
@@ -1257,7 +1255,7 @@ void AODVQoSRouting::handleRREQ(AODVQoSRREQ *rreq, const L3Address& sourceAddr, 
     if (destRouteData && destRouteData->isActive() && destRouteData->hasValidDestNum() && destRouteData->getDestSeqNum() >= rreq->getDestSeqNum())
     {
         EV_INFO << "I am an intermediate node who has information about a route to " << rreq->getDestAddr() << endl;
-
+        std::cout << simTime() << ",RREQWithKnownDestination" << endl;
         if (destRoute->getNextHopAsGeneric() == sourceAddr)
         {
             EV_WARN << "This RREP would make a loop. Dropping it" << endl;
@@ -1729,9 +1727,12 @@ void AODVQoSRouting::handleWaitForQoSRREP(WaitForQoSRREP *rrepTimer)
     EV_INFO << "We didn't get any Route Reply within RREP timeout" << endl;
     L3Address destAddr = rrepTimer->getDestAddr();
     numRREQWithoutReply++;
+    std::cout << simTime() << "RREQWithoutReply,1" << endl;
     ASSERT(addressToRreqRetries.find(destAddr) != addressToRreqRetries.end());
     if (addressToRreqRetries[destAddr] == rreqRetries)
     {
+        std::cout << simTime() << "StoppedRequest,1" << endl;
+        numRREQWithoutReply++;
         cancelRouteDiscovery(destAddr);
         EV_WARN << "Re-discovery attempts for node " << destAddr << " reached RREQ_RETRIES= " << rreqRetries << " limit. Stop sending RREQ." << endl;
         return;
@@ -2200,9 +2201,8 @@ AODVQoSRouting::~AODVQoSRouting()
         delete it->second;
     }
 
-//    std::cout << numRREQWithoutReply << endl;
-    std::cout << host->getFullName() << "," << host->getId() << "," << "NumOfKnownDestOfIntermediate," << rcvdRREQWithKnownDestination << endl;
+    std::cout << numRREQWithoutReply << endl;
     std::cout << host->getFullName() << "," << host->getId() << "," << "SentRREQ," << sentRREQ << endl;
-
+    std::cout << numRREQWithoutReply << endl;
 }
 

@@ -1,0 +1,8 @@
+#ignore result folder
+./results/*
+
+#ignore all vector and scalar file extensions
+*.sca
+*.vec
+*.rt
+*.csv
